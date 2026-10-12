@@ -37,10 +37,30 @@ public class OrientationFilterTests
     public void LearnsGyroBiasWhileStill()
     {
         var f = new OrientationFilter();
-        var bias = new Vector3(0.01f, -0.02f, 0.005f);
-        Feed(f, 0, 2500, bias); // 5 s still with a biased gyro
-        Assert.True((f.GyroBias - bias).Length() < 0.001f);
-        Assert.InRange(MathF.Abs(f.GetEulerDegrees().Yaw), 0, 1.5f);
+        var bias = new Vector3(0.3f, -0.5f, 0.2f) * (MathF.PI / 180); // °/s, a few times the real sensor's
+        var rng = new Random(1);
+        uint tick = 0;
+        float yawAt5s = 0;
+        for (var i = 0; i < 7500; i++) // 15 s still, with ~0.5 °/s noise like the real sensor
+        {
+            tick += TicksPerSample;
+            var noise = new Vector3((float)rng.NextDouble() - 0.5f, (float)rng.NextDouble() - 0.5f, (float)rng.NextDouble() - 0.5f)
+                        * (1.7f * MathF.PI / 180);
+            f.Update(new ImuSample(Vector3.UnitY, bias + noise, null, 30, tick));
+            if (i == 2500) yawAt5s = f.GetEulerDegrees().Yaw;
+        }
+        Assert.True((f.GyroBias - bias).Length() < 0.05f * MathF.PI / 180);
+        Assert.InRange(MathF.Abs(f.GetEulerDegrees().Yaw - yawAt5s), 0, 0.2f); // < 0.02 °/s creep
+    }
+
+    [Fact]
+    public void SlowHeadSwayDoesNotBecomeBias()
+    {
+        var f = new OrientationFilter();
+        var tick = Feed(f, 0, 2500, Vector3.Zero); // 5 s still, bias learned as zero
+        Feed(f, tick, 5000, new Vector3(0, 3f * MathF.PI / 180, 0)); // 10 s slow 3 °/s turn
+        Assert.True(f.GyroBias.Length() < 0.01f * MathF.PI / 180);
+        Assert.Equal(30, f.GetEulerDegrees().Yaw, 0.5f);
     }
 
     [Fact]

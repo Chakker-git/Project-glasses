@@ -55,7 +55,7 @@ internal static class ImuCommand
         glasses.Disconnected += ex => disconnected = ex.Message;
 
         Console.WriteLine("Starting IMU. Keep your head STILL for the first 3 seconds (gyro calibration).");
-        Console.WriteLine("Keys: R = recenter, Q = quit.");
+        Console.WriteLine("Keys: R = recenter, M = mark (log current angles), Q = quit.");
         Console.WriteLine();
         glasses.Start();
 
@@ -64,6 +64,7 @@ internal static class ImuCommand
         var nextPrint = 0L;
         var rate = 0L;
         var interactive = !Console.IsInputRedirected;
+        var marks = new List<string>();
         while (clock.Elapsed.TotalSeconds < seconds && disconnected == null)
         {
             Thread.Sleep(100);
@@ -72,6 +73,13 @@ internal static class ImuCommand
                 var key = Console.ReadKey(intercept: true).Key;
                 if (key == ConsoleKey.Q) break;
                 if (key == ConsoleKey.R) { filter.Recenter(); Console.WriteLine("  -- recentered --"); }
+                if (key == ConsoleKey.M)
+                {
+                    var e = filter.GetEulerDegrees();
+                    var mark = $"MARK {marks.Count + 1} at {clock.Elapsed.TotalSeconds:F1}s: yaw {e.Yaw:F1}  pitch {e.Pitch:F1}  roll {e.Roll:F1}";
+                    marks.Add(mark);
+                    Console.WriteLine($"  >> {mark}");
+                }
             }
 
             ImuSample s;
@@ -114,6 +122,7 @@ internal static class ImuCommand
         var b = filter.GyroBias;
         Console.WriteLine($"Samples: {samples} in {clock.Elapsed.TotalSeconds:F1}s (~{samples / clock.Elapsed.TotalSeconds:F0} Hz)");
         Console.WriteLine($"Learned gyro bias: {Deg(b.X):F2} {Deg(b.Y):F2} {Deg(b.Z):F2} dps");
+        foreach (var mark in marks) Console.WriteLine(mark);
         Console.WriteLine($"Raw samples saved to {Path.GetFullPath(csvPath)}");
         if (samples == 0)
             Console.WriteLine("No IMU data arrived. Paste this output to Claude; next step is trying alternate commands.");

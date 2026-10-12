@@ -51,7 +51,7 @@ GlassesProbe.exe imu
 ```
 
 - `imu` turns on the glasses' motion sensor and prints live yaw/pitch/roll 4x per second.
-  Keep still for the first 3 seconds while it calibrates. `R` recenters, `Q` quits.
+  Keep still for the first 3 seconds while it calibrates. `R` recenters, `M` logs the current angles, `Q` quits.
   It sends three commands to the glasses: device info, IMU on, and IMU off on exit.
 
 - `list` shows every HID and USB device and flags the likely glasses with `*`.
