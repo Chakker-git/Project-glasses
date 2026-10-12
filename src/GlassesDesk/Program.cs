@@ -14,7 +14,7 @@ internal static class Program
     private enum Command
     {
         Recenter, Level, Quit, PanelBigger, PanelSmaller, FovUp, FovDown, PredictUp, PredictDown,
-        MountPitchUp, MountPitchDown, MountRollLeft, MountRollRight,
+        MountPitchUp, MountPitchDown, MountRollLeft, MountRollRight, CycleFilter, ToggleStabilizer,
     }
 
     private const uint Shift = 0x0004; // MOD_SHIFT
@@ -34,6 +34,8 @@ internal static class Program
         (11, Shift, 0x28, Command.MountPitchDown, ""),
         (12, Shift, 0x27, Command.MountRollRight, "Shift+Left/Right fine-tune level: roll (if panels look rotated straight ahead)"),
         (13, Shift, 0x25, Command.MountRollLeft, ""),
+        (14, 0, 0x46, Command.CycleFilter, "F              text filter: sharp / smooth / plain (compare edge shimmer)"),
+        (15, 0, 0x53, Command.ToggleStabilizer, "S              jitter stabilizer on/off"),
     };
 
     private static readonly object AccelLock = new();
@@ -158,6 +160,9 @@ internal static class Program
             var anchorYaw = 0f;
             var anchorPitch = 0f;
             var centered = false;
+            renderer.Filter = settings.FilterMode;
+            var stabilizer = new PoseStabilizer();
+            var frameClock = Stopwatch.StartNew();
             var mount = settings.MountPitchDegrees is float mp && settings.MountRollDegrees is float mr
                 ? new MountCalibration(mp, mr)
                 : (MountCalibration?)null;
@@ -185,6 +190,15 @@ internal static class Program
                             lock (AccelLock) SetMount(MountCalibration.FromLevelHead(_smoothedAccel));
                             centered = false;
                             break;
+                        case Command.CycleFilter:
+                            settings.FilterMode = renderer.Filter = (renderer.Filter + 2) % 3; // sharp -> smooth -> plain
+                            Console.WriteLine($"  text filter: {(renderer.Filter switch { 2 => "sharp", 1 => "smooth", _ => "plain bilinear" })}");
+                            break;
+                        case Command.ToggleStabilizer:
+                            settings.Stabilize = !settings.Stabilize;
+                            stabilizer.Reset();
+                            Console.WriteLine($"  stabilizer {(settings.Stabilize ? "on" : "off")}");
+                            break;
                         case Command.MountPitchUp: SetMount((mount ?? default) with { PitchDegrees = (mount ?? default).PitchDegrees + 0.5f }); break;
                         case Command.MountPitchDown: SetMount((mount ?? default) with { PitchDegrees = (mount ?? default).PitchDegrees - 0.5f }); break;
                         case Command.MountRollRight: SetMount((mount ?? default) with { RollDegrees = (mount ?? default).RollDegrees + 0.5f }); break;
@@ -211,6 +225,9 @@ internal static class Program
                 }
                 // Camera follows the eyes, not the tilted sensor.
                 var head = filter.PredictOrientation(settings.PredictMilliseconds / 1000f) * (mount ?? default).Rotation;
+                var frameDt = (float)frameClock.Elapsed.TotalSeconds;
+                frameClock.Restart();
+                if (settings.Stabilize) head = stabilizer.Update(head, frameDt);
                 if (!centered && filter.IsReady)
                 {
                     (anchorYaw, anchorPitch) = YawPitch(head);

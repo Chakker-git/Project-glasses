@@ -16,6 +16,12 @@ internal sealed class Settings
     /// <summary>How far ahead to extrapolate head motion to hide latency.</summary>
     public float PredictMilliseconds { get; set; } = 16f;
 
+    /// <summary>Screen texture filter: 2 = sharp, 1 = smooth, 0 = plain bilinear.</summary>
+    public int FilterMode { get; set; } = 2;
+
+    /// <summary>Low-pass the pose while the head is nearly still, to stop sub-pixel shimmer.</summary>
+    public bool Stabilize { get; set; } = true;
+
     /// <summary>Sensor-to-display tilt from level calibration (Ctrl+Alt+H); null until calibrated.</summary>
     public float? MountPitchDegrees { get; set; }
     public float? MountRollDegrees { get; set; }

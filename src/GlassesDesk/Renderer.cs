@@ -23,6 +23,7 @@ internal sealed class Renderer : IDisposable
             row_major float4x4 Mvp;
             float4 Tint;
             float4 Mode;   // x: 0 = screen texture, 1 = checkerboard (no frame yet), 2 = solid tint
+                           // y: texture filter, 0 = bilinear, 1 = smooth, 2 = sharp
         };
         Texture2D Screen : register(t0);
         SamplerState Linear : register(s0);
@@ -38,6 +39,29 @@ internal sealed class Renderer : IDisposable
             return o;
         }
 
+        // Screen texture filtering. The panel is resampled at a slightly different size every frame as
+        // the head moves, so plain bilinear makes text edges shimmer. "Smooth" averages four samples
+        // spread over the output pixel's footprint (rotated grid), which is stable under motion;
+        // "sharp" adds an unsharp mask against a wider footprint to win back crispness.
+        float3 SampleScreen(float2 uv)
+        {
+            float2 dx = ddx(uv), dy = ddy(uv);   // texture-space size of one output pixel
+            float3 center = Screen.SampleLevel(Linear, uv, 0).rgb;
+            if (Mode.y < 0.5) return center;
+
+            float3 smooth = 0.25 * (
+                Screen.SampleLevel(Linear, uv + 0.375 * dx + 0.125 * dy, 0).rgb +
+                Screen.SampleLevel(Linear, uv - 0.375 * dx - 0.125 * dy, 0).rgb +
+                Screen.SampleLevel(Linear, uv + 0.125 * dx - 0.375 * dy, 0).rgb +
+                Screen.SampleLevel(Linear, uv - 0.125 * dx + 0.375 * dy, 0).rgb);
+            if (Mode.y < 1.5) return smooth;
+
+            float3 wide = 0.25 * (
+                Screen.SampleLevel(Linear, uv + dx, 0).rgb + Screen.SampleLevel(Linear, uv - dx, 0).rgb +
+                Screen.SampleLevel(Linear, uv + dy, 0).rgb + Screen.SampleLevel(Linear, uv - dy, 0).rgb);
+            return saturate(smooth + 0.7 * (smooth - wide));
+        }
+
         float4 PS(VsOut i) : SV_Target
         {
             if (Mode.x > 1.5) return Tint;
@@ -47,7 +71,7 @@ internal sealed class Renderer : IDisposable
                 float c = fmod(cell.x + cell.y, 2) * 0.4 + 0.2;
                 return float4(c, c, c * 1.5, 1);
             }
-            return float4(Screen.Sample(Linear, i.Uv).rgb, 1) * Tint;
+            return float4(SampleScreen(i.Uv), 1) * Tint;
         }
         """;
 
@@ -131,6 +155,9 @@ internal sealed class Renderer : IDisposable
     /// Draws each panel: a thin coloured border, then the screen texture (or a checkerboard if no
     /// frame has arrived yet, so a capture problem is visible instead of looking like nothing).
     /// </summary>
+    /// <summary>0 = bilinear, 1 = smooth, 2 = sharp. See SampleScreen in the shader.</summary>
+    public int Filter { get; set; } = 2;
+
     public void Render(Matrix4x4 viewProjection, IEnumerable<PanelDraw> panels)
     {
         _context.OMSetRenderTargets(_target);
@@ -155,7 +182,7 @@ internal sealed class Renderer : IDisposable
 
     private void Draw(Matrix4x4 mvp, ID3D11ShaderResourceView? view, Vector4 tint, int mode)
     {
-        var constants = new Constants { Mvp = mvp, Tint = tint, Mode = new Vector4(mode, 0, 0, 0) };
+        var constants = new Constants { Mvp = mvp, Tint = tint, Mode = new Vector4(mode, Filter, 0, 0) };
         _context.UpdateSubresource(in constants, _constants);
         _context.PSSetShaderResource(0, view!);
         _context.Draw(4, 0);

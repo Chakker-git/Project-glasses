@@ -50,8 +50,10 @@ Hotkeys (Ctrl+Alt + ...):
 | Shift+Up / Shift+Down | Fine-tune tilt (if panels lean when you turn your head) |
 | Shift+Left / Shift+Right | Fine-tune roll (if panels look rotated straight ahead) |
 | Up / Down | Panel size |
-| PgUp / PgDn | Field of view. If panels slide *with* your head when you turn, raise it; if they slide *against* it, lower it |
+| PgUp / PgDn | Field of view. Line up a panel corner with a real object behind it and turn your head slowly: the corner should stay on the object. If it overshoots or lags, adjust |
 | Left / Right | Motion prediction (ms) |
+| F | Text filter: sharp / smooth / plain. Compare edge shimmer while moving your head |
+| S | Jitter stabilizer on/off |
 | Q | Quit (saves settings and gyro calibration) |
 
 Options: `--list` (show displays), `--glasses N`, `--center N` (panel index straight ahead),
