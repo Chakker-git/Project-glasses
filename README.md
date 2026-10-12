@@ -35,8 +35,11 @@ does for Windows. See `src/GlassesCore/RayNeoProtocol.cs`.
 ## Running GlassesDesk
 
 Plug in the glasses, then run `GlassesDesk.exe`. It finds the glasses' display (`SmartGlasses`),
-draws every other monitor as a panel in a row around you, in the same left-to-right order as
-Windows Display Settings, and keeps them fixed in space as you turn your head.
+draws every other monitor (or only the virtual ones, if any exist) as a panel around you, laid out
+the way they're arranged in Windows Display Settings: a monitor placed above another appears above
+you, one to the right appears to the right. Panels stay fixed in space as you turn your head, and
+the layout rebuilds itself when you change resolution, orientation or arrangement.
+The main display sits straight ahead.
 
 Hold still for a couple of seconds at start: tracking calibrates, then the row appears centred
 where you're looking.

@@ -5,44 +5,46 @@ namespace GlassesCore;
 /// <summary>A monitor to show as a virtual panel: its pixel size and its desktop position.</summary>
 public readonly record struct PanelSource(int Left, int Top, int Width, int Height);
 
-/// <summary>Where a panel sits around the viewer: yaw of its centre (+ = left) and its angular width.</summary>
-public readonly record struct PanelPlacement(float YawDegrees, float WidthDegrees, float Aspect);
+/// <summary>
+/// Where a panel sits around the viewer: yaw (+ = left) and pitch (+ = up) of its centre, its angular
+/// width, and its aspect ratio.
+/// </summary>
+public readonly record struct PanelPlacement(float YawDegrees, float WidthDegrees, float Aspect, float PitchDegrees = 0);
 
 /// <summary>
-/// Lays monitors out left-to-right on a ring around the viewer in the same order as the Windows
-/// desktop, so dragging a window off the right edge of one panel lands it on the panel to the right.
+/// Places monitors around the viewer the way they're arranged in Windows Display Settings: a monitor
+/// to the right of another appears to the right, one above appears above. Dragging a window off one
+/// panel's edge therefore lands it on the neighbouring panel. Sizes are proportional to pixels, so
+/// every panel has the same text size and a portrait monitor is tall.
 /// </summary>
 public static class PanelLayout
 {
     /// <param name="sources">Monitors to show.</param>
-    /// <param name="panelWidthDegrees">Angular width of a 16:9-or-wider panel; narrower ones keep their height.</param>
-    /// <param name="gapDegrees">Space between neighbouring panels.</param>
-    /// <param name="centerIndex">Which panel (in left-to-right order) sits straight ahead; null centres the row.</param>
+    /// <param name="reference">The monitor that sits straight ahead.</param>
+    /// <param name="referenceWidthDegrees">Angular width of the reference monitor; sets degrees per pixel.</param>
+    /// <param name="gapDegrees">Space between monitors that touch on the desktop.</param>
     public static IReadOnlyList<(PanelSource Source, PanelPlacement Placement)> Arrange(
-        IEnumerable<PanelSource> sources, float panelWidthDegrees, float gapDegrees, int? centerIndex = null)
+        IEnumerable<PanelSource> sources, PanelSource reference, float referenceWidthDegrees, float gapDegrees)
     {
-        var ordered = sources.OrderBy(s => s.Left).ThenBy(s => s.Top).ToList();
-        if (ordered.Count == 0) return Array.Empty<(PanelSource, PanelPlacement)>();
+        var list = sources.OrderBy(s => s.Left).ThenBy(s => s.Top).ToList();
+        if (list.Count == 0 || reference.Width <= 0) return Array.Empty<(PanelSource, PanelPlacement)>();
 
-        // Same angular height for every panel; width follows each monitor's aspect ratio.
-        var height = panelWidthDegrees * 9f / 16f;
-        var widths = ordered.Select(s => height * s.Width / (float)s.Height).ToList();
+        var degreesPerPixel = referenceWidthDegrees / reference.Width;
+        // Spread positions so neighbours that touch on the desktop get a gap between them.
+        var spacing = (referenceWidthDegrees + gapDegrees) / referenceWidthDegrees;
+        var refCx = reference.Left + reference.Width / 2f;
+        var refCy = reference.Top + reference.Height / 2f;
 
-        // Running position of each panel's centre, measured rightward from the first panel's left edge.
-        var centers = new float[ordered.Count];
-        var x = 0f;
-        for (var i = 0; i < ordered.Count; i++)
+        return list.Select(s =>
         {
-            centers[i] = x + widths[i] / 2;
-            x += widths[i] + gapDegrees;
-        }
-        var total = x - gapDegrees;
-        var origin = centerIndex is int c && c >= 0 && c < ordered.Count ? centers[c] : total / 2;
-
-        // Rightward distance becomes negative yaw (yaw + = left).
-        return ordered
-            .Select((s, i) => (s, new PanelPlacement(origin - centers[i], widths[i], s.Width / (float)s.Height)))
-            .ToList();
+            var dx = s.Left + s.Width / 2f - refCx;
+            var dy = s.Top + s.Height / 2f - refCy;
+            return (s, new PanelPlacement(
+                YawDegrees: -dx * degreesPerPixel * spacing,   // right on the desktop = negative yaw
+                WidthDegrees: s.Width * degreesPerPixel,
+                Aspect: s.Width / (float)s.Height,
+                PitchDegrees: -dy * degreesPerPixel * spacing)); // desktop Y grows downward
+        }).ToList();
     }
 
     /// <summary>
@@ -58,7 +60,7 @@ public static class PanelLayout
         var halfHeight = halfWidth / p.Aspect;
         return Matrix4x4.CreateScale(halfWidth, halfHeight, 1)
                * Matrix4x4.CreateTranslation(0, 0, -distance)
-               * Matrix4x4.CreateRotationX(pitchDegrees * toRad)
+               * Matrix4x4.CreateRotationX((pitchDegrees + p.PitchDegrees) * toRad)
                * Matrix4x4.CreateRotationY((p.YawDegrees + yawOffsetDegrees) * toRad);
     }
 }

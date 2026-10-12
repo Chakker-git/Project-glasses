@@ -8,7 +8,7 @@ internal sealed class Settings
     /// <summary>Diagonal field of view of the glasses. Wrong values make panels drift as you turn.</summary>
     public float FovDegrees { get; set; } = 46f;
 
-    /// <summary>Angular width of a 16:9 panel.</summary>
+    /// <summary>Angular width of the centre monitor's panel; the others scale with their pixel size.</summary>
     public float PanelWidthDegrees { get; set; } = 38f;
 
     public float GapDegrees { get; set; } = 3f;

@@ -8,6 +8,12 @@ internal static class Native
     public const int WM_DESTROY = 0x0002;
     public const int WM_CLOSE = 0x0010;
     public const int WM_HOTKEY = 0x0312;
+    public const int WM_DISPLAYCHANGE = 0x007E;
+    public static readonly IntPtr HWND_TOPMOST = new(-1);
+    public const uint SWP_NOACTIVATE = 0x0010;
+
+    [DllImport("user32.dll")]
+    public static extern bool SetWindowPos(IntPtr hwnd, IntPtr insertAfter, int x, int y, int cx, int cy, uint flags);
     public const int WM_MOUSEACTIVATE = 0x0021;
     public const int MA_NOACTIVATE = 3;
 

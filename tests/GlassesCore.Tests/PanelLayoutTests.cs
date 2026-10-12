@@ -7,36 +7,39 @@ namespace GlassesCore.Tests;
 public class PanelLayoutTests
 {
     [Fact]
-    public void OrdersByDesktopPositionAndCentresTheRow()
+    public void RowFollowsDesktopOrderAroundTheReference()
     {
-        var sources = new[]
-        {
-            new PanelSource(1920, 0, 1920, 1080),   // middle
-            new PanelSource(-1920, 0, 1920, 1080),  // left
-            new PanelSource(3840, 0, 1920, 1080),   // right
-        };
-        var layout = PanelLayout.Arrange(sources, panelWidthDegrees: 40, gapDegrees: 4);
+        var middle = new PanelSource(1920, 0, 1920, 1080);
+        var sources = new[] { middle, new PanelSource(0, 0, 1920, 1080), new PanelSource(3840, 0, 1920, 1080) };
+        var layout = PanelLayout.Arrange(sources, middle, referenceWidthDegrees: 40, gapDegrees: 4);
 
-        Assert.Equal(new[] { -1920, 1920, 3840 }, layout.Select(l => l.Source.Left));
-        Assert.Equal(44, layout[0].Placement.YawDegrees, 3);   // left panel is at + yaw
+        Assert.Equal(new[] { 0, 1920, 3840 }, layout.Select(l => l.Source.Left));
+        Assert.Equal(44, layout[0].Placement.YawDegrees, 3);   // left monitor is at + yaw
         Assert.Equal(0, layout[1].Placement.YawDegrees, 3);
         Assert.Equal(-44, layout[2].Placement.YawDegrees, 3);
+        Assert.All(layout, l => Assert.Equal(0, l.Placement.PitchDegrees, 3));
     }
 
     [Fact]
-    public void CenterIndexPutsThatPanelStraightAhead()
+    public void MonitorAboveIsPlacedAbove()
     {
-        var sources = new[] { new PanelSource(0, 0, 1920, 1080), new PanelSource(1920, 0, 1920, 1080) };
-        var layout = PanelLayout.Arrange(sources, 40, 4, centerIndex: 0);
-        Assert.Equal(0, layout[0].Placement.YawDegrees, 3);
-        Assert.Equal(-44, layout[1].Placement.YawDegrees, 3);
+        var main = new PanelSource(0, 0, 1920, 1080);
+        var above = new PanelSource(0, -1080, 1920, 1080);
+        var layout = PanelLayout.Arrange(new[] { main, above }, main, 40, 4);
+        var top = layout.Single(l => l.Source == above).Placement;
+        Assert.Equal(0, top.YawDegrees, 3);
+        Assert.Equal(22.5f * 44f / 40f, top.PitchDegrees, 2); // one panel height plus proportional gap
     }
 
     [Fact]
-    public void TallerMonitorKeepsHeightAndNarrows()
+    public void SizesAreProportionalToPixels()
     {
-        var layout = PanelLayout.Arrange(new[] { new PanelSource(0, 0, 1920, 1200) }, 40, 4);
-        Assert.Equal(22.5f * 1920 / 1200, layout[0].Placement.WidthDegrees, 3);
+        var main = new PanelSource(0, 0, 1920, 1080);
+        var portrait = new PanelSource(1920, 0, 1080, 1920);
+        var layout = PanelLayout.Arrange(new[] { main, portrait }, main, 40, 4);
+        var p = layout.Single(l => l.Source == portrait).Placement;
+        Assert.Equal(40f * 1080 / 1920, p.WidthDegrees, 3);
+        Assert.Equal(1080f / 1920, p.Aspect, 3);
     }
 
     [Fact]

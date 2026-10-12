@@ -14,7 +14,7 @@ internal static class Program
     private enum Command
     {
         Recenter, Level, Quit, PanelBigger, PanelSmaller, FovUp, FovDown, PredictUp, PredictDown,
-        MountPitchUp, MountPitchDown, MountRollLeft, MountRollRight, CycleFilter, ToggleStabilizer, PixelPerfect,
+        MountPitchUp, MountPitchDown, MountRollLeft, MountRollRight, CycleFilter, ToggleStabilizer, PixelPerfect, DisplaysChanged,
     }
 
     private const uint Shift = 0x0004; // MOD_SHIFT
@@ -57,18 +57,12 @@ internal static class Program
         foreach (var d in displays) Console.WriteLine($"  {d}");
         if (args.Contains("--list")) return 0;
 
-        var glassesDisplay = ArgInt(args, "--glasses") is int gi && gi < displays.Count
-            ? displays[gi]
-            : displays.FirstOrDefault(d => d.LooksLikeGlasses);
+        var (glassesDisplay, sources) = SelectDisplays(displays, args);
         if (glassesDisplay == null)
         {
             Console.WriteLine("Couldn't find the glasses display. Run with --glasses N using an index above.");
             return 1;
         }
-        // With virtual monitors installed, show only those (the laptop panel and real monitors stay
-        // as they are); --all shows every monitor except the glasses.
-        var others = displays.Where(d => d != glassesDisplay).ToList();
-        var sources = !args.Contains("--all") && others.Any(d => d.IsVirtual) ? others.Where(d => d.IsVirtual).ToList() : others;
         if (sources.Count == 0)
         {
             Console.WriteLine("No other monitors to show.");
@@ -114,7 +108,8 @@ internal static class Program
             if (!RegisterHotKey(hwnd, h.Id, MOD_CONTROL | MOD_ALT | h.Mods | MOD_NOREPEAT, h.Vk))
                 Console.WriteLine($"  warning: Ctrl+Alt hotkey {h.Label.Split(' ')[0]} is taken by another app");
 
-        var renderThread = new Thread(() => RenderLoop(hwnd, glassesDisplay.Bounds, sources, settings, centerIndex, filter, () => imuSamples))
+        var renderThread = new Thread(() => RenderLoop(hwnd, glassesDisplay.Bounds, () => SelectDisplays(Displays.Enumerate(), args),
+            settings, centerIndex, filter, () => imuSamples))
         {
             IsBackground = true,
             Name = "Render",
@@ -140,8 +135,33 @@ internal static class Program
         return 0;
     }
 
-    private static void RenderLoop(IntPtr hwnd, RECT bounds, List<Display> sources, Settings settings,
-        int? centerIndex, OrientationFilter filter, Func<long> imuSamples)
+    /// <summary>
+    /// Picks the glasses display and the monitors to show. With virtual monitors installed only those
+    /// are shown (the laptop panel and real monitors stay as they are); --all shows every monitor
+    /// except the glasses.
+    /// </summary>
+    private static (Display? Glasses, List<Display> Sources) SelectDisplays(List<Display> displays, string[] args)
+    {
+        var glasses = ArgInt(args, "--glasses") is int gi && gi < displays.Count
+            ? displays[gi]
+            : displays.FirstOrDefault(d => d.LooksLikeGlasses);
+        var others = displays.Where(d => d != glasses).ToList();
+        var sources = !args.Contains("--all") && others.Any(d => d.IsVirtual) ? others.Where(d => d.IsVirtual).ToList() : others;
+        return (glasses, sources);
+    }
+
+    private static PanelSource ToSource(Display d) => new(d.Bounds.Left, d.Bounds.Top, d.Bounds.Width, d.Bounds.Height);
+
+    /// <summary>The monitor straight ahead: --center N (left-to-right), else the main display, else the middle one.</summary>
+    private static Display ChooseReference(List<Display> sources, int? centerIndex)
+    {
+        var ordered = sources.OrderBy(d => d.Bounds.Left).ThenBy(d => d.Bounds.Top).ToList();
+        if (centerIndex is int c && c >= 0 && c < ordered.Count) return ordered[c];
+        return ordered.FirstOrDefault(d => d.IsPrimary) ?? ordered[ordered.Count / 2];
+    }
+
+    private static void RenderLoop(IntPtr hwnd, RECT bounds, Func<(Display? Glasses, List<Display> Sources)> selectDisplays,
+        Settings settings, int? centerIndex, OrientationFilter filter, Func<long> imuSamples)
     {
         try
         {
@@ -149,16 +169,49 @@ internal static class Program
             using var renderer = new Renderer(hwnd, bounds.Width, bounds.Height);
             var winrtDevice = MonitorCapture.CreateWinRTDevice(renderer.Device);
             var captures = new List<MonitorCapture>();
-            foreach (var display in sources)
-            {
-                try { captures.Add(new MonitorCapture(renderer.Device, winrtDevice, display)); }
-                catch (Exception ex) { Console.WriteLine($"Can't capture {display.FriendlyName}: {ex.Message}"); }
-            }
-
+            var byBounds = new Dictionary<PanelSource, MonitorCapture>();
+            Display? reference = null;
             IReadOnlyList<(PanelSource Source, PanelPlacement Placement)> layout = Array.Empty<(PanelSource, PanelPlacement)>();
-            var byBounds = captures.ToDictionary(c => new PanelSource(c.Display.Bounds.Left, c.Display.Bounds.Top, c.Display.Bounds.Width, c.Display.Bounds.Height));
-            void Relayout() => layout = PanelLayout.Arrange(byBounds.Keys, settings.PanelWidthDegrees, settings.GapDegrees, centerIndex);
-            Relayout();
+            void Relayout() => layout = reference == null
+                ? Array.Empty<(PanelSource, PanelPlacement)>()
+                : PanelLayout.Arrange(byBounds.Keys, ToSource(reference), settings.PanelWidthDegrees, settings.GapDegrees);
+
+            // (Re)creates captures for the current display setup; runs at start and after Windows
+            // reports a display change (resolution, orientation, arrangement, monitors added/removed).
+            void Rebuild()
+            {
+                foreach (var c in captures) c.Dispose();
+                captures.Clear();
+                byBounds.Clear();
+                var (glassesDisplay, sources) = selectDisplays();
+                if (glassesDisplay == null)
+                {
+                    Console.WriteLine("  glasses display not found; waiting for it to come back");
+                }
+                else if (!glassesDisplay.Bounds.Equals(bounds))
+                {
+                    if (glassesDisplay.Bounds.Width != bounds.Width || glassesDisplay.Bounds.Height != bounds.Height)
+                        Console.WriteLine("  glasses resolution changed; restart GlassesDesk to pick it up");
+                    bounds = glassesDisplay.Bounds;
+                    SetWindowPos(hwnd, HWND_TOPMOST, bounds.Left, bounds.Top, bounds.Width, bounds.Height, SWP_NOACTIVATE);
+                }
+                foreach (var display in sources)
+                {
+                    try
+                    {
+                        var capture = new MonitorCapture(renderer.Device, winrtDevice, display);
+                        captures.Add(capture);
+                        byBounds[ToSource(display)] = capture;
+                    }
+                    catch (Exception ex) { Console.WriteLine($"Can't capture {display.FriendlyName}: {ex.Message}"); }
+                }
+                reference = captures.Count > 0 ? ChooseReference(captures.Select(c => c.Display).ToList(), centerIndex) : null;
+                Relayout();
+                Console.WriteLine($"  showing {captures.Count} monitor(s): " +
+                                  string.Join(", ", captures.Select(c => c.Display.FriendlyName + (c.Display == reference ? " (centre)" : ""))));
+            }
+            Rebuild();
+            var rebuildAt = (DateTime?)null;
 
             var aspect = bounds.Width / (float)bounds.Height;
             var anchorYaw = 0f;
@@ -190,18 +243,21 @@ internal static class Program
                     switch (command)
                     {
                         case Command.Recenter: centered = false; break;
+                        case Command.DisplaysChanged:
+                            // Windows sends several of these while reconfiguring; rebuild once it settles.
+                            rebuildAt = DateTime.UtcNow.AddSeconds(1);
+                            break;
                         case Command.Level:
                             lock (AccelLock) SetMount(MountCalibration.FromLevelHead(_smoothedAccel));
                             centered = false;
                             break;
-                        case Command.PixelPerfect when captures.Count > 0:
+                        case Command.PixelPerfect when reference != null:
                         {
-                            // Size panels so a monitor's pixels map 1:1 onto glasses pixels when looked at
-                            // straight on: tan(W/2) = srcW / dispW * tan(hFov/2).
-                            var b = captures[0].Display.Bounds;
+                            // Size panels so the centre monitor's pixels map 1:1 onto glasses pixels when
+                            // looked at straight on: tan(W/2) = srcW / dispW * tan(hFov/2).
+                            var b = reference.Bounds;
                             var tanHalfH = MathF.Tan(settings.FovDegrees * MathF.PI / 360f) * aspect / MathF.Sqrt(1 + aspect * aspect);
-                            var width = 2 * MathF.Atan(b.Width / (float)bounds.Width * tanHalfH) * 180f / MathF.PI;
-                            settings.PanelWidthDegrees = width * (16f / 9f) / (b.Width / (float)b.Height);
+                            settings.PanelWidthDegrees = 2 * MathF.Atan(b.Width / (float)bounds.Width * tanHalfH) * 180f / MathF.PI;
                             Relayout();
                             Console.WriteLine($"  pixel-perfect: {settings}");
                             break;
@@ -229,6 +285,13 @@ internal static class Program
                     if (command is Command.PanelBigger or Command.PanelSmaller or Command.FovUp or Command.FovDown
                         or Command.PredictUp or Command.PredictDown)
                         Console.WriteLine($"  {settings}");
+                }
+
+                if (rebuildAt is DateTime due && DateTime.UtcNow >= due)
+                {
+                    rebuildAt = null;
+                    Console.WriteLine("  display setup changed; rebuilding panels");
+                    Rebuild();
                 }
 
                 foreach (var capture in captures) capture.Update(renderer.Context);
@@ -329,6 +392,9 @@ internal static class Program
                 if (hotkey.Command == Command.Quit) DestroyWindow(hwnd);
                 else if (hotkey.Id != 0) Commands.Enqueue(hotkey.Command);
                 return IntPtr.Zero;
+            case WM_DISPLAYCHANGE:
+                Commands.Enqueue(Command.DisplaysChanged);
+                break;
             case WM_MOUSEACTIVATE:
                 return MA_NOACTIVATE;
             case WM_CLOSE:
