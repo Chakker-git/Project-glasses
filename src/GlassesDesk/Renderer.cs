@@ -13,6 +13,8 @@ namespace GlassesDesk;
 /// Uses a waitable flip-model swap chain with a maximum frame latency of 1 so head pose is sampled
 /// as late as possible before each frame.
 /// </summary>
+internal readonly record struct PanelDraw(ID3D11ShaderResourceView? View, Matrix4x4 World, Matrix4x4 BorderWorld);
+
 internal sealed class Renderer : IDisposable
 {
     private const string ShaderSource = """
@@ -20,6 +22,7 @@ internal sealed class Renderer : IDisposable
         {
             row_major float4x4 Mvp;
             float4 Tint;
+            float4 Mode;   // x: 0 = screen texture, 1 = checkerboard (no frame yet), 2 = solid tint
         };
         Texture2D Screen : register(t0);
         SamplerState Linear : register(s0);
@@ -37,6 +40,13 @@ internal sealed class Renderer : IDisposable
 
         float4 PS(VsOut i) : SV_Target
         {
+            if (Mode.x > 1.5) return Tint;
+            if (Mode.x > 0.5)
+            {
+                float2 cell = floor(i.Uv * float2(16, 9));
+                float c = fmod(cell.x + cell.y, 2) * 0.4 + 0.2;
+                return float4(c, c, c * 1.5, 1);
+            }
             return float4(Screen.Sample(Linear, i.Uv).rgb, 1) * Tint;
         }
         """;
@@ -46,7 +56,11 @@ internal sealed class Renderer : IDisposable
     {
         public Matrix4x4 Mvp;
         public Vector4 Tint;
+        public Vector4 Mode;
     }
+
+    private static readonly Vector4 BorderColor = new(0.15f, 0.25f, 0.45f, 1);
+    private static readonly Color4 Background = new(0.02f, 0.02f, 0.035f, 1);
 
     private readonly ID3D11DeviceContext _context;
     private readonly IDXGISwapChain2 _swapChain;
@@ -113,27 +127,38 @@ internal sealed class Renderer : IDisposable
 
     public ID3D11DeviceContext Context => _context;
 
-    public void Render(Matrix4x4 viewProjection, IEnumerable<(ID3D11ShaderResourceView View, Matrix4x4 World)> panels)
+    /// <summary>
+    /// Draws each panel: a thin coloured border, then the screen texture (or a checkerboard if no
+    /// frame has arrived yet, so a capture problem is visible instead of looking like nothing).
+    /// </summary>
+    public void Render(Matrix4x4 viewProjection, IEnumerable<PanelDraw> panels)
     {
         _context.OMSetRenderTargets(_target);
-        _context.ClearRenderTargetView(_target, new Color4(0, 0, 0, 1));
+        _context.ClearRenderTargetView(_target, Background);
         _context.RSSetViewport(new Viewport(Width, Height));
         _context.RSSetState(_rasterizer);
         _context.IASetPrimitiveTopology(PrimitiveTopology.TriangleStrip);
         _context.VSSetShader(_vertexShader);
         _context.PSSetShader(_pixelShader);
         _context.VSSetConstantBuffer(0, _constants);
+        _context.PSSetConstantBuffer(0, _constants);
         _context.PSSetSampler(0, _sampler);
 
-        foreach (var (view, world) in panels)
+        foreach (var panel in panels)
         {
-            var constants = new Constants { Mvp = world * viewProjection, Tint = Vector4.One };
-            _context.UpdateSubresource(in constants, _constants);
-            _context.PSSetShaderResource(0, view);
-            _context.Draw(4, 0);
+            Draw(panel.BorderWorld * viewProjection, null, BorderColor, mode: 2);
+            Draw(panel.World * viewProjection, panel.View, Vector4.One, mode: panel.View == null ? 1 : 0);
         }
 
         _swapChain.Present(1, PresentFlags.None);
+    }
+
+    private void Draw(Matrix4x4 mvp, ID3D11ShaderResourceView? view, Vector4 tint, int mode)
+    {
+        var constants = new Constants { Mvp = mvp, Tint = tint, Mode = new Vector4(mode, 0, 0, 0) };
+        _context.UpdateSubresource(in constants, _constants);
+        _context.PSSetShaderResource(0, view!);
+        _context.Draw(4, 0);
     }
 
     public void Dispose()

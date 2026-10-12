@@ -79,6 +79,11 @@ internal static class Native
     public static extern IntPtr CreateWindowEx(uint exStyle, string className, string windowName, uint style,
         int x, int y, int width, int height, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
 
+    public const int IDC_ARROW = 32512;
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr LoadCursor(IntPtr instance, int cursorName);
+
     [DllImport("user32.dll")]
     public static extern IntPtr DefWindowProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
 

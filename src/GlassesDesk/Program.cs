@@ -167,9 +167,7 @@ internal static class Program
                 var head = filter.PredictOrientation(settings.PredictMilliseconds / 1000f);
                 if (!centered && filter.IsReady)
                 {
-                    var forward = Vector3.Transform(-Vector3.UnitZ, head);
-                    anchorYaw = MathF.Atan2(-forward.X, -forward.Z) * 180f / MathF.PI;
-                    anchorPitch = MathF.Asin(Math.Clamp(forward.Y, -1, 1)) * 180f / MathF.PI;
+                    (anchorYaw, anchorPitch) = YawPitch(head);
                     centered = true;
                     Console.WriteLine($"  recentered (yaw {anchorYaw:F1}°, pitch {anchorPitch:F1}°)");
                 }
@@ -181,17 +179,28 @@ internal static class Program
                 var projection = Matrix4x4.CreatePerspectiveFieldOfView(verticalFov, aspect, 0.05f, 100f);
 
                 const float distance = 2f;
-                var panels = layout
-                    .Select(l => (Capture: byBounds[l.Source], l.Placement))
-                    .Where(p => p.Capture.View != null)
-                    .Select(p => (p.Capture.View!, PanelLayout.WorldMatrix(p.Placement, distance, anchorPitch, anchorYaw)));
-                renderer.Render(view * projection, centered ? panels : Enumerable.Empty<(Vortice.Direct3D11.ID3D11ShaderResourceView, Matrix4x4)>());
+                const float borderDegrees = 0.4f;
+                var panels = layout.Select(l =>
+                {
+                    var border = l.Placement with
+                    {
+                        WidthDegrees = l.Placement.WidthDegrees + 2 * borderDegrees,
+                        Aspect = (l.Placement.WidthDegrees + 2 * borderDegrees) / (l.Placement.WidthDegrees / l.Placement.Aspect + 2 * borderDegrees),
+                    };
+                    return new PanelDraw(byBounds[l.Source].View,
+                        PanelLayout.WorldMatrix(l.Placement, distance, anchorPitch, anchorYaw),
+                        PanelLayout.WorldMatrix(border, distance * 1.001f, anchorPitch, anchorYaw));
+                });
+                renderer.Render(view * projection, centered ? panels : Enumerable.Empty<PanelDraw>());
 
                 frames++;
                 if (clock.ElapsedMilliseconds >= 5000)
                 {
                     var samples = imuSamples();
-                    Console.WriteLine($"  {frames / clock.Elapsed.TotalSeconds:F0} fps, IMU {(samples - lastSamples) / clock.Elapsed.TotalSeconds:F0} Hz");
+                    var (yaw, pitch) = YawPitch(filter.Orientation);
+                    Console.WriteLine($"  {frames / clock.Elapsed.TotalSeconds:F0} fps, IMU {(samples - lastSamples) / clock.Elapsed.TotalSeconds:F0} Hz, " +
+                                      $"head yaw {yaw - anchorYaw:F0}° pitch {pitch - anchorPitch:F0}° from centre | " +
+                                      string.Join(" | ", captures.Select(c => c.Status)));
                     lastSamples = samples;
                     frames = 0;
                     clock.Restart();
@@ -207,6 +216,13 @@ internal static class Program
         }
     }
 
+    private static (float Yaw, float Pitch) YawPitch(Quaternion q)
+    {
+        var forward = Vector3.Transform(-Vector3.UnitZ, q);
+        return (MathF.Atan2(-forward.X, -forward.Z) * 180f / MathF.PI,
+                MathF.Asin(Math.Clamp(forward.Y, -1, 1)) * 180f / MathF.PI);
+    }
+
     private static IntPtr CreateGlassesWindow(RECT bounds)
     {
         _wndProc = WindowProc;
@@ -215,6 +231,7 @@ internal static class Program
             cbSize = (uint)Marshal.SizeOf<WNDCLASSEX>(),
             lpfnWndProc = Marshal.GetFunctionPointerForDelegate(_wndProc),
             hInstance = GetModuleHandle(null),
+            hCursor = LoadCursor(IntPtr.Zero, IDC_ARROW),
             lpszClassName = "GlassesDeskWindow",
         };
         RegisterClassEx(ref wc);

@@ -30,6 +30,10 @@ internal sealed unsafe class MonitorCapture : IDisposable
     private ID3D11Texture2D? _texture;
 
     public Display Display { get; }
+    public long FramesReceived { get; private set; }
+    public string Status => View == null
+        ? $"{Display.FriendlyName}: {FramesReceived} frames, no image yet"
+        : $"{Display.FriendlyName}: {FramesReceived} frames, {_size.Width}x{_size.Height}";
     public ID3D11ShaderResourceView? View { get; private set; }
 
     public MonitorCapture(ID3D11Device device, IDirect3DDevice winrtDevice, Display display)
@@ -51,6 +55,7 @@ internal sealed unsafe class MonitorCapture : IDisposable
     {
         using var frame = _pool.TryGetNextFrame();
         if (frame == null) return;
+        FramesReceived++;
 
         if (frame.ContentSize.Width != _size.Width || frame.ContentSize.Height != _size.Height)
         {
