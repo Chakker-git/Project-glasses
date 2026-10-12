@@ -35,6 +35,7 @@ public sealed class OrientationFilter
     private readonly object _lock = new();
     private Quaternion _q = Quaternion.Identity;
     private Vector3 _bias;
+    private Vector3 _omega; // latest bias-corrected angular velocity, body frame
     private bool _initialized;
     private uint? _lastTick;
     private BiasWindow _window;
@@ -77,6 +78,7 @@ public sealed class OrientationFilter
 
             LearnBias(s, accelNorm, dt);
             var w = s.Gyro - _bias;
+            _omega = w;
 
             if (MathF.Abs(accelNorm - 1) < MaxAccelDeviation && w.Length() < MaxTurnRateForTilt)
             {
@@ -154,6 +156,22 @@ public sealed class OrientationFilter
     }
 
     /// <summary>
+    /// Orientation extrapolated <paramref name="seconds"/> ahead at the current angular velocity,
+    /// to hide render and display latency. Recenter offset applied.
+    /// </summary>
+    public Quaternion PredictOrientation(float seconds)
+    {
+        lock (_lock)
+        {
+            var q = _q;
+            var rate = _omega.Length();
+            if (seconds > 0 && rate > 1e-6f)
+                q = Quaternion.Normalize(q * Quaternion.CreateFromAxisAngle(_omega / rate, rate * seconds));
+            return Quaternion.CreateFromAxisAngle(Vector3.UnitY, -_yawOffset) * q;
+        }
+    }
+
+    /// <summary>
     /// Seeds the gyro bias from a previous session so drift is low from the first second.
     /// Learning continues from there.
     /// </summary>
@@ -162,7 +180,7 @@ public sealed class OrientationFilter
         lock (_lock)
         {
             _bias = bias;
-            _biasWindows = BiasAveragingWindows;
+            _biasWindows = BiasAveragingWindows / 2; // still refined by the first few still windows
         }
     }
 

@@ -11,10 +11,10 @@ view, and you can drag windows between them.
 | Stage | What | Status |
 |---|---|---|
 | 1. Sensor probe | Find out whether the glasses expose a motion sensor (IMU) over USB | **done**: `1BBB:AF50`, vendor HID, 64-byte frames |
-| 2. Head tracking | Turn on the IMU, decode it, and turn it into head yaw/pitch/roll, with a recenter key to fix drift | **testing on hardware** |
-| 3. Virtual monitors | Add 2–4 virtual displays with an open-source Indirect Display Driver so Windows extends the desktop onto them | — |
-| 4. Renderer | Full-screen app on the glasses: capture each virtual monitor, draw them as panels on a curved ring, rotate the view against head motion | — |
-| 5. Latency polish | Predict head motion a few ms ahead so the panels stay put | — |
+| 2. Head tracking | Turn on the IMU, decode it, and turn it into head yaw/pitch/roll, with a recenter key to fix drift | **done**: ~500 Hz, ≤1% error per 360° turn |
+| 3. Renderer | `GlassesDesk`: full-screen on the glasses, captures every other monitor and draws it as a panel fixed in space | **testing on hardware** |
+| 4. Virtual monitors | Add 2–4 virtual displays with an open-source Indirect Display Driver so Windows extends the desktop onto them | — |
+| 5. Polish | Compass drift correction, sharper text, gaze-following cursor | — |
 
 Stack: C# / .NET 8, HidSharp for USB HID, Direct3D 11 + Windows.Graphics.Capture for rendering.
 
@@ -29,14 +29,40 @@ does for Windows. See `src/GlassesCore/RayNeoProtocol.cs`.
 
 - `src/GlassesCore`: protocol decoder, HID connection, orientation filter (shared library)
 - `src/GlassesProbe`: diagnostic CLI
+- `src/GlassesDesk`: the world-locked monitor app (Direct3D 11 via Vortice, Windows.Graphics.Capture)
 - `tests/GlassesCore.Tests`: unit tests (`dotnet test`)
+
+## Running GlassesDesk
+
+Plug in the glasses, then run `GlassesDesk.exe`. It finds the glasses' display (`SmartGlasses`),
+draws every other monitor as a panel in a row around you, in the same left-to-right order as
+Windows Display Settings, and keeps them fixed in space as you turn your head.
+
+Hold still for a couple of seconds at start: tracking calibrates, then the row appears centred
+where you're looking.
+
+Hotkeys (Ctrl+Alt + ...):
+
+| Key | Action |
+|---|---|
+| R | Recenter: the row re-centres on where you're looking |
+| Up / Down | Panel size |
+| PgUp / PgDn | Field of view. If panels slide *with* your head when you turn, raise it; if they slide *against* it, lower it |
+| Left / Right | Motion prediction (ms) |
+| Q | Quit (saves settings and gyro calibration) |
+
+Options: `--list` (show displays), `--glasses N`, `--center N` (panel index straight ahead),
+`--fov`, `--width`, `--gap`, `--predict-ms`. Settings persist in `%LOCALAPPDATA%\ProjectGlasses\settings.json`.
+
+Tip: in Windows Display Settings, put the glasses' display somewhere the mouse won't wander onto
+(e.g. diagonally off a corner). The cursor only shows on the panels.
 
 ## Running the probe
 
 ### Get the exe
 
 Option A, no install: open the repo's **Actions** tab on GitHub, pick the latest `build` run,
-download the `GlassesProbe-win-x64` artifact and unzip it.
+download the `ProjectGlasses-win-x64` artifact and unzip it.
 
 Option B, from source: install the .NET 8 SDK (`winget install Microsoft.DotNet.SDK.8`), then
 from the repo folder run `dotnet run --project src/GlassesProbe -- list`.
