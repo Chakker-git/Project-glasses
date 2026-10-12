@@ -10,19 +10,28 @@ view, and you can drag windows between them.
 
 | Stage | What | Status |
 |---|---|---|
-| 1. Sensor probe | Find out whether the glasses expose a motion sensor (IMU) over USB, and capture its raw data | **in progress** |
-| 2. Head tracking | Decode the IMU packets and turn them into head yaw/pitch/roll, with a recenter hotkey to fix drift | blocked on 1 |
+| 1. Sensor probe | Find out whether the glasses expose a motion sensor (IMU) over USB | **done**: `1BBB:AF50`, vendor HID, 64-byte frames |
+| 2. Head tracking | Turn on the IMU, decode it, and turn it into head yaw/pitch/roll, with a recenter key to fix drift | **testing on hardware** |
 | 3. Virtual monitors | Add 2–4 virtual displays with an open-source Indirect Display Driver so Windows extends the desktop onto them | — |
 | 4. Renderer | Full-screen app on the glasses: capture each virtual monitor, draw them as panels on a curved ring, rotate the view against head motion | — |
 | 5. Latency polish | Predict head motion a few ms ahead so the panels stay put | — |
 
 Stack: C# / .NET 8, HidSharp for USB HID, Direct3D 11 + Windows.Graphics.Capture for rendering.
 
-**Known risk:** RayNeo says the Air 4 Pro doesn't support 3DoF. That's a software statement.
-Earlier RayNeo glasses (Air 2/2s/3s) have an IMU inside despite similar marketing, which is
-what stage 1 is checking.
+RayNeo says the Air 4 Pro doesn't support 3DoF, but that's only about their software. The glasses
+have a 9-axis IMU (accel, gyro, magnetometer) at ~500 Hz on a vendor HID interface. The protocol
+comes from two MIT-licensed projects:
+[RayNeo-Air-3S-Pro-OpenVR](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR) and
+[hovera](https://github.com/MegaBadCoder/hovera), a macOS app doing the same thing this project
+does for Windows. See `src/GlassesCore/RayNeoProtocol.cs`.
 
-## Stage 1: running the probe
+## Layout
+
+- `src/GlassesCore`: protocol decoder, HID connection, orientation filter (shared library)
+- `src/GlassesProbe`: diagnostic CLI
+- `tests/GlassesCore.Tests`: unit tests (`dotnet test`)
+
+## Running the probe
 
 ### Get the exe
 
@@ -38,8 +47,12 @@ Plug the glasses into the laptop, then in a terminal in the folder with the exe:
 
 ```
 GlassesProbe.exe list
-GlassesProbe.exe dump
+GlassesProbe.exe imu
 ```
+
+- `imu` turns on the glasses' motion sensor and prints live yaw/pitch/roll 4x per second.
+  Keep still for the first 3 seconds while it calibrates. `R` recenters, `Q` quits.
+  It sends three commands to the glasses: device info, IMU on, and IMU off on exit.
 
 - `list` shows every HID and USB device and flags the likely glasses with `*`.
 - `dump` reads the flagged devices for 30 seconds while you follow head-movement prompts
@@ -50,4 +63,4 @@ GlassesProbe.exe dump
 Each run saves its output to a `probe-*.txt` file next to the exe, plus a `.csv` of raw reports per device.
 Send the `.txt` files back for analysis.
 
-The probe is read-only: it never sends anything to the glasses.
+`list` and `dump` are read-only.

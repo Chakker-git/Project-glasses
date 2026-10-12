@@ -14,8 +14,9 @@ namespace GlassesProbe;
 //   GlassesProbe dump [targets] [--seconds N]
 //                                     read raw input reports while you follow
 //                                     on-screen head-movement prompts
+//   GlassesProbe imu [--seconds N]    start the RayNeo IMU stream and show live orientation
 //
-// Everything is read-only: the probe never sends anything to the device.
+// list and dump are read-only. imu sends the IMU on/off and device-info commands.
 internal static class Program
 {
     // 0x1BBB is TCL's USB vendor ID (RayNeo is a TCL brand). Unconfirmed for the Air 4 Pro,
@@ -43,6 +44,9 @@ internal static class Program
                 case "dump":
                     Dump(rest);
                     break;
+                case "imu":
+                    ImuCommand.Run(rest);
+                    break;
                 default:
                     PrintHelp();
                     return 1;
@@ -68,6 +72,7 @@ internal static class Program
         Console.WriteLine("  GlassesProbe dump 1bbb            (by vendor ID)");
         Console.WriteLine("  GlassesProbe dump 1bbb:af50       (by vendor:product ID)");
         Console.WriteLine("  Options: --seconds N  (default 30)");
+        Console.WriteLine("  GlassesProbe imu [--seconds N]     turn on the glasses' IMU and show live head orientation");
     }
 
     // ---------------------------------------------------------------- list
@@ -129,7 +134,7 @@ internal static class Program
 
         var flagged = devices.Count(IsSuspect);
         Console.WriteLine(flagged > 0
-            ? $"{flagged} HID interface(s) flagged. Next: run 'GlassesProbe dump'."
+            ? $"{flagged} HID interface(s) flagged. Next: run 'GlassesProbe imu'."
             : "Nothing flagged automatically. Look for the glasses in the USB list above and " +
               "run 'GlassesProbe dump <vid>' with their vendor ID.");
     }
