@@ -10,9 +10,12 @@ internal sealed record Display(int Index, IntPtr Handle, string DeviceName, stri
         FriendlyName.Contains("SmartGlasses", StringComparison.OrdinalIgnoreCase) ||
         FriendlyName.Contains("RayNeo", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>A monitor created by the Virtual Display Driver (VirtualDrivers/Virtual-Display-Driver, EDID name "VDD by MTT").</summary>
+    public bool IsVirtual => FriendlyName.StartsWith("VDD by MTT", StringComparison.OrdinalIgnoreCase);
+
     public override string ToString() =>
         $"[{Index}] {FriendlyName,-28} {DeviceName,-14} {Bounds.Width}x{Bounds.Height} at ({Bounds.Left},{Bounds.Top})" +
-        (IsPrimary ? "  primary" : "") + (LooksLikeGlasses ? "  <- glasses" : "");
+        (IsPrimary ? "  primary" : "") + (LooksLikeGlasses ? "  <- glasses" : "") + (IsVirtual ? "  (virtual)" : "");
 }
 
 internal static class Displays

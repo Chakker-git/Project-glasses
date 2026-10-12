@@ -13,7 +13,7 @@ view, and you can drag windows between them.
 | 1. Sensor probe | Find out whether the glasses expose a motion sensor (IMU) over USB | **done**: `1BBB:AF50`, vendor HID, 64-byte frames |
 | 2. Head tracking | Turn on the IMU, decode it, and turn it into head yaw/pitch/roll, with a recenter key to fix drift | **done**: ~500 Hz, ≤1% error per 360° turn |
 | 3. Renderer | `GlassesDesk`: full-screen on the glasses, captures every other monitor and draws it as a panel fixed in space | **testing on hardware** |
-| 4. Virtual monitors | Add 2–4 virtual displays with an open-source Indirect Display Driver so Windows extends the desktop onto them | — |
+| 4. Virtual monitors | Virtual Display Driver (MIT, signed) adds fake 1920×1080 monitors; GlassesDesk shows only those when present. See [docs/virtual-monitors.md](docs/virtual-monitors.md) | **ready to install** |
 | 5. Polish | Compass drift correction, sharper text, gaze-following cursor | — |
 
 Stack: C# / .NET 8, HidSharp for USB HID, Direct3D 11 + Windows.Graphics.Capture for rendering.
@@ -50,6 +50,7 @@ Hotkeys (Ctrl+Alt + ...):
 | Shift+Up / Shift+Down | Fine-tune tilt (if panels lean when you turn your head) |
 | Shift+Left / Shift+Right | Fine-tune roll (if panels look rotated straight ahead) |
 | Up / Down | Panel size |
+| 0 | Pixel-perfect panel size: one desktop pixel per glasses pixel when looking straight at a panel (sharpest) |
 | PgUp / PgDn | Field of view. Line up a panel corner with a real object behind it and turn your head slowly: the corner should stay on the object. If it overshoots or lags, adjust |
 | Left / Right | Motion prediction (ms) |
 | F | Text filter: sharp / smooth / plain. Compare edge shimmer while moving your head |

@@ -14,7 +14,7 @@ internal static class Program
     private enum Command
     {
         Recenter, Level, Quit, PanelBigger, PanelSmaller, FovUp, FovDown, PredictUp, PredictDown,
-        MountPitchUp, MountPitchDown, MountRollLeft, MountRollRight, CycleFilter, ToggleStabilizer,
+        MountPitchUp, MountPitchDown, MountRollLeft, MountRollRight, CycleFilter, ToggleStabilizer, PixelPerfect,
     }
 
     private const uint Shift = 0x0004; // MOD_SHIFT
@@ -36,6 +36,7 @@ internal static class Program
         (13, Shift, 0x25, Command.MountRollLeft, ""),
         (14, 0, 0x46, Command.CycleFilter, "F              text filter: sharp / smooth / plain (compare edge shimmer)"),
         (15, 0, 0x53, Command.ToggleStabilizer, "S              jitter stabilizer on/off"),
+        (16, 0, 0x30, Command.PixelPerfect, "0              pixel-perfect panel size (sharpest; best with 1920x1080 monitors)"),
     };
 
     private static readonly object AccelLock = new();
@@ -64,7 +65,10 @@ internal static class Program
             Console.WriteLine("Couldn't find the glasses display. Run with --glasses N using an index above.");
             return 1;
         }
-        var sources = displays.Where(d => d != glassesDisplay).ToList();
+        // With virtual monitors installed, show only those (the laptop panel and real monitors stay
+        // as they are); --all shows every monitor except the glasses.
+        var others = displays.Where(d => d != glassesDisplay).ToList();
+        var sources = !args.Contains("--all") && others.Any(d => d.IsVirtual) ? others.Where(d => d.IsVirtual).ToList() : others;
         if (sources.Count == 0)
         {
             Console.WriteLine("No other monitors to show.");
@@ -190,6 +194,18 @@ internal static class Program
                             lock (AccelLock) SetMount(MountCalibration.FromLevelHead(_smoothedAccel));
                             centered = false;
                             break;
+                        case Command.PixelPerfect when captures.Count > 0:
+                        {
+                            // Size panels so a monitor's pixels map 1:1 onto glasses pixels when looked at
+                            // straight on: tan(W/2) = srcW / dispW * tan(hFov/2).
+                            var b = captures[0].Display.Bounds;
+                            var tanHalfH = MathF.Tan(settings.FovDegrees * MathF.PI / 360f) * aspect / MathF.Sqrt(1 + aspect * aspect);
+                            var width = 2 * MathF.Atan(b.Width / (float)bounds.Width * tanHalfH) * 180f / MathF.PI;
+                            settings.PanelWidthDegrees = width * (16f / 9f) / (b.Width / (float)b.Height);
+                            Relayout();
+                            Console.WriteLine($"  pixel-perfect: {settings}");
+                            break;
+                        }
                         case Command.CycleFilter:
                             settings.FilterMode = renderer.Filter = (renderer.Filter + 2) % 3; // sharp -> smooth -> plain
                             Console.WriteLine($"  text filter: {(renderer.Filter switch { 2 => "sharp", 1 => "smooth", _ => "plain bilinear" })}");
