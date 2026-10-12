@@ -16,6 +16,10 @@ internal sealed class Settings
     /// <summary>How far ahead to extrapolate head motion to hide latency.</summary>
     public float PredictMilliseconds { get; set; } = 16f;
 
+    /// <summary>Sensor-to-display tilt from level calibration (Ctrl+Alt+H); null until calibrated.</summary>
+    public float? MountPitchDegrees { get; set; }
+    public float? MountRollDegrees { get; set; }
+
     /// <summary>Gyro bias from the last session (°/s), so tracking starts without drift.</summary>
     public float[]? GyroBiasDps { get; set; }
 

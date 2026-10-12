@@ -11,19 +11,33 @@ namespace GlassesDesk;
 // rendered full-screen on the glasses and counter-rotated against head motion.
 internal static class Program
 {
-    private enum Command { Recenter, Quit, PanelBigger, PanelSmaller, FovUp, FovDown, PredictUp, PredictDown }
-
-    private static readonly (int Id, uint Vk, Command Command, string Label)[] Hotkeys =
+    private enum Command
     {
-        (1, 0x52, Command.Recenter, "R          recenter (look where you want the middle panel, then press)"),
-        (2, 0x51, Command.Quit, "Q          quit"),
-        (3, 0x26, Command.PanelBigger, "Up/Down    panel size"),
-        (4, 0x28, Command.PanelSmaller, ""),
-        (5, 0x21, Command.FovUp, "PgUp/PgDn  field of view (tune until panels stay put as you turn)"),
-        (6, 0x22, Command.FovDown, ""),
-        (7, 0x27, Command.PredictUp, "Left/Right motion prediction"),
-        (8, 0x25, Command.PredictDown, ""),
+        Recenter, Level, Quit, PanelBigger, PanelSmaller, FovUp, FovDown, PredictUp, PredictDown,
+        MountPitchUp, MountPitchDown, MountRollLeft, MountRollRight,
+    }
+
+    private const uint Shift = 0x0004; // MOD_SHIFT
+
+    private static readonly (int Id, uint Mods, uint Vk, Command Command, string Label)[] Hotkeys =
+    {
+        (1, 0, 0x52, Command.Recenter, "R              recenter (look where you want the middle panel, then press)"),
+        (2, 0, 0x48, Command.Level, "H              level calibration: hold your head level, look straight ahead, press"),
+        (3, 0, 0x51, Command.Quit, "Q              quit"),
+        (4, 0, 0x26, Command.PanelBigger, "Up/Down        panel size"),
+        (5, 0, 0x28, Command.PanelSmaller, ""),
+        (6, 0, 0x21, Command.FovUp, "PgUp/PgDn      field of view (tune until panels stay put as you turn)"),
+        (7, 0, 0x22, Command.FovDown, ""),
+        (8, 0, 0x27, Command.PredictUp, "Left/Right     motion prediction"),
+        (9, 0, 0x25, Command.PredictDown, ""),
+        (10, Shift, 0x26, Command.MountPitchUp, "Shift+Up/Down  fine-tune level: tilt (if panels lean as you turn)"),
+        (11, Shift, 0x28, Command.MountPitchDown, ""),
+        (12, Shift, 0x27, Command.MountRollRight, "Shift+Left/Right fine-tune level: roll (if panels look rotated straight ahead)"),
+        (13, Shift, 0x25, Command.MountRollLeft, ""),
     };
+
+    private static readonly object AccelLock = new();
+    private static Vector3 _smoothedAccel = Vector3.UnitY;
 
     private static readonly ConcurrentQueue<Command> Commands = new();
     private static WndProc? _wndProc; // keep the delegate alive for the window's lifetime
@@ -72,7 +86,12 @@ internal static class Program
         if (settings.GyroBiasDps is { Length: 3 } b)
             filter.SetInitialBias(new Vector3(b[0], b[1], b[2]) * (MathF.PI / 180f));
         long imuSamples = 0;
-        glasses.ImuSample += s => { filter.Update(s); Interlocked.Increment(ref imuSamples); };
+        glasses.ImuSample += s =>
+        {
+            filter.Update(s);
+            Interlocked.Increment(ref imuSamples);
+            lock (AccelLock) _smoothedAccel = Vector3.Lerp(_smoothedAccel, s.Accel, 0.02f); // ~0.1 s low-pass
+        };
         glasses.Disconnected += ex => Console.WriteLine($"Glasses disconnected: {ex.Message}");
         glasses.Start();
 
@@ -86,8 +105,8 @@ internal static class Program
 
         var hwnd = CreateGlassesWindow(glassesDisplay.Bounds);
         foreach (var h in Hotkeys)
-            if (!RegisterHotKey(hwnd, h.Id, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, h.Vk))
-                Console.WriteLine($"  warning: Ctrl+Alt hotkey {h.Vk:X2} is taken by another app");
+            if (!RegisterHotKey(hwnd, h.Id, MOD_CONTROL | MOD_ALT | h.Mods | MOD_NOREPEAT, h.Vk))
+                Console.WriteLine($"  warning: Ctrl+Alt hotkey {h.Label.Split(' ')[0]} is taken by another app");
 
         var renderThread = new Thread(() => RenderLoop(hwnd, glassesDisplay.Bounds, sources, settings, centerIndex, filter, () => imuSamples))
         {
@@ -139,6 +158,16 @@ internal static class Program
             var anchorYaw = 0f;
             var anchorPitch = 0f;
             var centered = false;
+            var mount = settings.MountPitchDegrees is float mp && settings.MountRollDegrees is float mr
+                ? new MountCalibration(mp, mr)
+                : (MountCalibration?)null;
+            void SetMount(MountCalibration m)
+            {
+                mount = m;
+                settings.MountPitchDegrees = m.PitchDegrees;
+                settings.MountRollDegrees = m.RollDegrees;
+                Console.WriteLine($"  level calibration: sensor tilt {m.PitchDegrees:F1}°, roll {m.RollDegrees:F1}°");
+            }
             var frames = 0;
             var clock = Stopwatch.StartNew();
             var lastSamples = imuSamples();
@@ -152,6 +181,14 @@ internal static class Program
                     switch (command)
                     {
                         case Command.Recenter: centered = false; break;
+                        case Command.Level:
+                            lock (AccelLock) SetMount(MountCalibration.FromLevelHead(_smoothedAccel));
+                            centered = false;
+                            break;
+                        case Command.MountPitchUp: SetMount((mount ?? default) with { PitchDegrees = (mount ?? default).PitchDegrees + 0.5f }); break;
+                        case Command.MountPitchDown: SetMount((mount ?? default) with { PitchDegrees = (mount ?? default).PitchDegrees - 0.5f }); break;
+                        case Command.MountRollRight: SetMount((mount ?? default) with { RollDegrees = (mount ?? default).RollDegrees + 0.5f }); break;
+                        case Command.MountRollLeft: SetMount((mount ?? default) with { RollDegrees = (mount ?? default).RollDegrees - 0.5f }); break;
                         case Command.PanelBigger: settings.PanelWidthDegrees += 2; Relayout(); break;
                         case Command.PanelSmaller: settings.PanelWidthDegrees = MathF.Max(10, settings.PanelWidthDegrees - 2); Relayout(); break;
                         case Command.FovUp: settings.FovDegrees += 0.5f; break;
@@ -159,12 +196,21 @@ internal static class Program
                         case Command.PredictUp: settings.PredictMilliseconds += 4; break;
                         case Command.PredictDown: settings.PredictMilliseconds = MathF.Max(0, settings.PredictMilliseconds - 4); break;
                     }
-                    if (command != Command.Recenter) Console.WriteLine($"  {settings}");
+                    if (command is Command.PanelBigger or Command.PanelSmaller or Command.FovUp or Command.FovDown
+                        or Command.PredictUp or Command.PredictDown)
+                        Console.WriteLine($"  {settings}");
                 }
 
                 foreach (var capture in captures) capture.Update(renderer.Context);
 
-                var head = filter.PredictOrientation(settings.PredictMilliseconds / 1000f);
+                if (!centered && filter.IsReady && mount == null)
+                {
+                    // First run: assume the wearer starts out looking straight ahead with a level head.
+                    Console.WriteLine("  first run: calibrating level from your current head position (Ctrl+Alt+H to redo)");
+                    lock (AccelLock) SetMount(MountCalibration.FromLevelHead(_smoothedAccel));
+                }
+                // Camera follows the eyes, not the tilted sensor.
+                var head = filter.PredictOrientation(settings.PredictMilliseconds / 1000f) * (mount ?? default).Rotation;
                 if (!centered && filter.IsReady)
                 {
                     (anchorYaw, anchorPitch) = YawPitch(head);
@@ -197,7 +243,7 @@ internal static class Program
                 if (clock.ElapsedMilliseconds >= 5000)
                 {
                     var samples = imuSamples();
-                    var (yaw, pitch) = YawPitch(filter.Orientation);
+                    var (yaw, pitch) = YawPitch(filter.Orientation * (mount ?? default).Rotation);
                     Console.WriteLine($"  {frames / clock.Elapsed.TotalSeconds:F0} fps, IMU {(samples - lastSamples) / clock.Elapsed.TotalSeconds:F0} Hz, " +
                                       $"head yaw {yaw - anchorYaw:F0}° pitch {pitch - anchorPitch:F0}° from centre | " +
                                       string.Join(" | ", captures.Select(c => c.Status)));

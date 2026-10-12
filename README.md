@@ -46,6 +46,9 @@ Hotkeys (Ctrl+Alt + ...):
 | Key | Action |
 |---|---|
 | R | Recenter: the row re-centres on where you're looking |
+| H | Level calibration: hold your head level, look straight ahead, press. Fixes tilted panels (the sensor sits ~17° nose-down in the frame). Runs automatically on first launch |
+| Shift+Up / Shift+Down | Fine-tune tilt (if panels lean when you turn your head) |
+| Shift+Left / Shift+Right | Fine-tune roll (if panels look rotated straight ahead) |
 | Up / Down | Panel size |
 | PgUp / PgDn | Field of view. If panels slide *with* your head when you turn, raise it; if they slide *against* it, lower it |
 | Left / Right | Motion prediction (ms) |
