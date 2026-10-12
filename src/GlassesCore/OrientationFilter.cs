@@ -22,10 +22,11 @@ public sealed class OrientationFilter
     // Air 4 Pro: true bias ~0.05 °/s, noise ~0.5 °/s per axis. Slow head sway also has low
     // noise, so a window's mean must also sit close to the current bias, and learning is slow.
     private const double BiasWindowSeconds = 0.5;
-    private const float StillGyroStd = 0.9f * DegToRad;      // per-axis std within a window
+    private const float StillGyroStd = 0.7f * DegToRad;      // per-axis std within a window (noise floor ~0.5)
     private const float StillAccelStd = 0.01f;               // g
     private const float StillAccelDeviation = 0.05f;         // g, |norm - 1|
-    private const float MaxBiasStep = 1.0f * DegToRad;       // ignore windows further than this from the bias
+    private const float MaxBiasStep = 0.3f * DegToRad;       // ignore windows further than this from the bias
+    private const float MaxPlausibleBias = 1.0f * DegToRad;  // first window: anything bigger is head motion
     private const float BiasTimeConstant = 20f;              // seconds
     private const double SensorWarmupSeconds = 1.0;          // gyro reads off for ~1 s after IMU on
     private const int BiasAveragingWindows = 10;             // plain average of the first N still windows
@@ -105,7 +106,9 @@ public sealed class OrientationFilter
                     && MathF.Abs(accelMean - 1) < StillAccelDeviation;
         if (!still) return;
 
-        if (_biasWindows > 0 && (mean - _bias).Length() > MaxBiasStep) return; // slow, steady head turn
+        // Slow, steady head sway looks like bias, so only accept windows near the current estimate.
+        var reference = _biasWindows > 0 ? MaxBiasStep : MaxPlausibleBias;
+        if ((mean - _bias).Length() > reference) return;
 
         if (_biasWindows < BiasAveragingWindows)
         {
@@ -147,6 +150,19 @@ public sealed class OrientationFilter
         {
             var mean = _accelSum / _count;
             return ((float)mean, (float)Math.Sqrt(Math.Max(0, _accelSumSq / _count - mean * mean)));
+        }
+    }
+
+    /// <summary>
+    /// Seeds the gyro bias from a previous session so drift is low from the first second.
+    /// Learning continues from there.
+    /// </summary>
+    public void SetInitialBias(Vector3 bias)
+    {
+        lock (_lock)
+        {
+            _bias = bias;
+            _biasWindows = BiasAveragingWindows;
         }
     }
 
