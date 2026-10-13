@@ -31,9 +31,17 @@ internal sealed unsafe class MonitorCapture : IDisposable
 
     public Display Display { get; }
     public long FramesReceived { get; private set; }
-    public string Status => View == null
-        ? $"{Display.FriendlyName}: {FramesReceived} frames, no image yet"
-        : $"{Display.FriendlyName}: {FramesReceived} frames, {_size.Width}x{_size.Height}";
+    private long _framesAtLastStatus;
+
+    /// <summary>Capture rate since the last call. Frames only arrive when the screen changes, so a still screen reads 0.</summary>
+    public string TakeStatus(double seconds)
+    {
+        var rate = (FramesReceived - _framesAtLastStatus) / Math.Max(seconds, 0.001);
+        _framesAtLastStatus = FramesReceived;
+        return View == null
+            ? $"{Display.FriendlyName} {Display.DeviceName}: no image yet"
+            : $"{Display.DeviceName} {rate:F0} fps";
+    }
     public ID3D11ShaderResourceView? View { get; private set; }
 
     public MonitorCapture(ID3D11Device device, IDirect3DDevice winrtDevice, Display display)

@@ -4,7 +4,8 @@ using static GlassesDesk.Native;
 namespace GlassesDesk;
 
 /// <summary>One attached monitor as Windows sees it.</summary>
-internal sealed record Display(int Index, IntPtr Handle, string DeviceName, string FriendlyName, RECT Bounds, bool IsPrimary)
+internal sealed record Display(int Index, IntPtr Handle, string DeviceName, string FriendlyName, RECT Bounds, bool IsPrimary,
+    RECT WorkArea = default, int RefreshHz = 0)
 {
     public bool LooksLikeGlasses =>
         FriendlyName.Contains("SmartGlasses", StringComparison.OrdinalIgnoreCase) ||
@@ -14,7 +15,7 @@ internal sealed record Display(int Index, IntPtr Handle, string DeviceName, stri
     public bool IsVirtual => FriendlyName.StartsWith("VDD by MTT", StringComparison.OrdinalIgnoreCase);
 
     public override string ToString() =>
-        $"[{Index}] {FriendlyName,-28} {DeviceName,-14} {Bounds.Width}x{Bounds.Height} at ({Bounds.Left},{Bounds.Top})" +
+        $"[{Index}] {FriendlyName,-28} {DeviceName,-14} {Bounds.Width}x{Bounds.Height} @{RefreshHz}Hz at ({Bounds.Left},{Bounds.Top})" +
         (IsPrimary ? "  primary" : "") + (LooksLikeGlasses ? "  <- glasses" : "") + (IsVirtual ? "  (virtual)" : "");
 }
 
@@ -35,8 +36,10 @@ internal static class Displays
         {
             var info = new MONITORINFOEX { cbSize = (uint)Marshal.SizeOf<MONITORINFOEX>() };
             if (!GetMonitorInfo(h, ref info)) continue;
+            var mode = new DEVMODE { dmSize = (short)Marshal.SizeOf<DEVMODE>() };
+            var hz = EnumDisplaySettings(info.szDevice, ENUM_CURRENT_SETTINGS, ref mode) ? mode.dmDisplayFrequency : 0;
             result.Add(new Display(0, h, info.szDevice, names.GetValueOrDefault(info.szDevice, "(unknown)"),
-                info.rcMonitor, (info.dwFlags & 1) != 0));
+                info.rcMonitor, (info.dwFlags & 1) != 0, info.rcWork, hz));
         }
         return result
             .OrderBy(d => d.Bounds.Left).ThenBy(d => d.Bounds.Top)

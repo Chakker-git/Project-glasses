@@ -103,7 +103,17 @@ internal static class Program
         Console.WriteLine("Keep your head still for a couple of seconds while tracking calibrates.");
         Console.WriteLine();
 
+        if (glassesDisplay.IsPrimary)
+        {
+            Console.WriteLine("WARNING: the glasses are your main display. The taskbar and new windows will be hidden behind");
+            Console.WriteLine("         the panels. Settings > System > Display: pick another display, tick 'Make this my main display'.");
+        }
+        foreach (var d in sources.Where(d => d.IsVirtual && d.RefreshHz > 60))
+            Console.WriteLine($"WARNING: virtual monitor {d.DeviceName} runs at {d.RefreshHz} Hz. Set it to 60 Hz (Display > Advanced display); " +
+                              "higher rates make the whole PC sluggish.");
+
         var hwnd = CreateGlassesWindow(glassesDisplay.Bounds);
+        SetTimer(hwnd, new IntPtr(1), 500, IntPtr.Zero); // WindowShepherd sweep
         foreach (var h in Hotkeys)
             if (!RegisterHotKey(hwnd, h.Id, MOD_CONTROL | MOD_ALT | h.Mods | MOD_NOREPEAT, h.Vk))
                 Console.WriteLine($"  warning: Ctrl+Alt hotkey {h.Label.Split(' ')[0]} is taken by another app");
@@ -206,6 +216,10 @@ internal static class Program
                     catch (Exception ex) { Console.WriteLine($"Can't capture {display.FriendlyName}: {ex.Message}"); }
                 }
                 reference = captures.Count > 0 ? ChooseReference(captures.Select(c => c.Display).ToList(), centerIndex) : null;
+                WindowShepherd.Current = glassesDisplay != null && reference != null
+                    ? new WindowShepherd.Target(glassesDisplay.Handle, glassesDisplay.Bounds,
+                        reference.WorkArea.Width > 0 ? reference.WorkArea : reference.Bounds)
+                    : null;
                 Relayout();
                 Console.WriteLine($"  showing {captures.Count} monitor(s): " +
                                   string.Join(", ", captures.Select(c => c.Display.FriendlyName + (c.Display == reference ? " (centre)" : ""))));
@@ -342,7 +356,7 @@ internal static class Program
                     var (yaw, pitch) = YawPitch(filter.Orientation * (mount ?? default).Rotation);
                     Console.WriteLine($"  {frames / clock.Elapsed.TotalSeconds:F0} fps, IMU {(samples - lastSamples) / clock.Elapsed.TotalSeconds:F0} Hz, " +
                                       $"head yaw {yaw - anchorYaw:F0}° pitch {pitch - anchorPitch:F0}° from centre | " +
-                                      string.Join(" | ", captures.Select(c => c.Status)));
+                                      string.Join(" | ", captures.Select(c => c.TakeStatus(clock.Elapsed.TotalSeconds))));
                     lastSamples = samples;
                     frames = 0;
                     clock.Restart();
@@ -392,7 +406,11 @@ internal static class Program
                 if (hotkey.Command == Command.Quit) DestroyWindow(hwnd);
                 else if (hotkey.Id != 0) Commands.Enqueue(hotkey.Command);
                 return IntPtr.Zero;
+            case WM_TIMER:
+                WindowShepherd.Sweep();
+                return IntPtr.Zero;
             case WM_DISPLAYCHANGE:
+                WindowShepherd.Current = null; // monitor handles may be stale until the rebuild
                 Commands.Enqueue(Command.DisplaysChanged);
                 break;
             case WM_MOUSEACTIVATE:
