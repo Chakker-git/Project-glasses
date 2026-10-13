@@ -14,13 +14,13 @@ jobs:
           dotnet-version: 8.0.x
       - name: Test
         run: dotnet test
-      - name: Publish exes
+      # Plain folder layout (exe + DLLs), not single-file: single-file self-extracting bundles are a
+      # common antivirus false-positive trigger for unsigned apps.
+      - name: Publish
         run: |
-          dotnet publish src/GlassesProbe -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
-          dotnet publish src/GlassesDesk -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
+          dotnet publish src/GlassesDesk -c Release -r win-x64 --self-contained true -o publish/ProjectGlasses
+          dotnet publish src/GlassesProbe -c Release -r win-x64 --self-contained true -o publish/ProjectGlasses
       - uses: actions/upload-artifact@v4
         with:
           name: ProjectGlasses-win-x64
-          path: |
-            publish/GlassesProbe.exe
-            publish/GlassesDesk.exe
+          path: publish/ProjectGlasses

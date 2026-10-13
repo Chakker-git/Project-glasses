@@ -71,7 +71,9 @@ Tip: in Windows Display Settings, put the glasses' display somewhere the mouse w
 ### Get the exe
 
 Option A, no install: open the repo's **Actions** tab on GitHub, pick the latest `build` run,
-download the `ProjectGlasses-win-x64` artifact and unzip it.
+download the `ProjectGlasses-win-x64` artifact and unzip it. It's a folder of ~200 files: keep them
+together and run the exes from inside that folder. (It used to be single-file exes, but antivirus
+flagged those as a false positive.)
 
 Option B, from source: install the .NET 8 SDK (`winget install Microsoft.DotNet.SDK.8`), then
 from the repo folder run `dotnet run --project src/GlassesProbe -- list`.
